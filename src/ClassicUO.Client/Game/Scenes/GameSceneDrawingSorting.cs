@@ -10,6 +10,7 @@ using ClassicUO.Renderer;
 using ClassicUO.Utility;
 using Microsoft.Xna.Framework;
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace ClassicUO.Game.Scenes
@@ -559,7 +560,7 @@ namespace ClassicUO.Game.Scenes
             return found;
         }
 
-        private void PushToRenderQueue(
+        private GameObjectRenderPreparation? PrepareForRendering(
             GameObject obj,
             bool isTransparent,
             bool allowSelection
@@ -567,7 +568,7 @@ namespace ClassicUO.Game.Scenes
         {
             if (obj.AlphaHue == 0)
             {
-                return;
+                return null;
             }
 
             // slow as fuck
@@ -591,15 +592,15 @@ namespace ClassicUO.Game.Scenes
                 }
             }
 
-            _renderLists.Add(obj, isTransparent || obj.AlphaHue != byte.MaxValue);
+            return new GameObjectRenderPreparation(obj, isTransparent || obj.AlphaHue != byte.MaxValue);
         }
 
-        private unsafe bool AddTileToRenderList(
+        private IEnumerable<GameObjectRenderPreparation?> PrepareAllGameObjectsOnTileForRendering(
             GameObject obj,
             bool useObjectHandles,
             int maxZ,
             int cotZ,
-            ref Vector2 playerScreePos
+            Vector2 playerScreePos
         )
         {
             for (; obj != null; obj = obj.TNext)
@@ -624,7 +625,7 @@ namespace ClassicUO.Game.Scenes
                     case Land land:
                         if (maxObjectZ > maxZ)
                         {
-                            return false;
+                            yield return null;
                         }
 
                         if (screenY > _maxPixel.Y)
@@ -643,7 +644,7 @@ namespace ClassicUO.Game.Scenes
                             continue;
                         }
 
-                        PushToRenderQueue(
+                        yield return PrepareForRendering(
                             obj,
                             false,
                             true
@@ -701,7 +702,7 @@ namespace ClassicUO.Game.Scenes
 
                             if (maxObjectZ > maxZ)
                             {
-                                return itemData.Height != 0 && maxObjectZ - maxZ < height;
+                                yield break;
                             }
 
                             if (screenY < _minPixel.Y || screenY > _maxPixel.Y)
@@ -722,7 +723,7 @@ namespace ClassicUO.Game.Scenes
                                 )
                             )
                             {
-                                PushToRenderQueue(
+                                yield return PrepareForRendering(
                                     obj,
                                     true,
                                     allowSelection
@@ -730,7 +731,7 @@ namespace ClassicUO.Game.Scenes
                             }
                             else
                             {
-                                PushToRenderQueue(
+                                yield return PrepareForRendering(
                                     obj,
                                     false,
                                     allowSelection
@@ -787,7 +788,7 @@ namespace ClassicUO.Game.Scenes
 
                             if (maxObjectZ > maxZ)
                             {
-                                return itemData.Height != 0 && maxObjectZ - maxZ < height;
+                                yield break;
                             }
 
                             if (screenY < _minPixel.Y || screenY > _maxPixel.Y)
@@ -808,7 +809,7 @@ namespace ClassicUO.Game.Scenes
                                 )
                             )
                             {
-                                PushToRenderQueue(
+                                yield return PrepareForRendering(
                                     obj,
                                     true,
                                     allowSelection
@@ -816,7 +817,7 @@ namespace ClassicUO.Game.Scenes
                             }
                             else
                             {
-                                PushToRenderQueue(
+                                yield return PrepareForRendering(
                                     obj,
                                     false,
                                     allowSelection
@@ -834,7 +835,7 @@ namespace ClassicUO.Game.Scenes
 
                             if (maxObjectZ > maxZ)
                             {
-                                return false;
+                                yield break;
                             }
 
                             StaticTiles empty = default;
@@ -860,7 +861,7 @@ namespace ClassicUO.Game.Scenes
 
                             obj.AllowedToDraw = !HasSurfaceOverhead(mobile);
 
-                            PushToRenderQueue(
+                            yield return PrepareForRendering(
                                 obj,
                                 false,
                                 allowSelection
@@ -929,7 +930,7 @@ namespace ClassicUO.Game.Scenes
 
                             if (maxObjectZ > maxZ)
                             {
-                                return itemData.Height != 0 && maxObjectZ - maxZ < height;
+                                yield break;
                             }
 
                             if (screenY < _minPixel.Y || screenY > _maxPixel.Y)
@@ -944,7 +945,7 @@ namespace ClassicUO.Game.Scenes
 
                             if (item.IsCorpse)
                             {
-                                PushToRenderQueue(
+                                yield return PrepareForRendering(
                                     obj,
                                     false,
                                     allowSelection
@@ -952,7 +953,7 @@ namespace ClassicUO.Game.Scenes
                             }
                             else
                             {
-                                PushToRenderQueue(
+                                yield return PrepareForRendering(
                                     obj,
                                     false,
                                     true
@@ -964,15 +965,15 @@ namespace ClassicUO.Game.Scenes
 
                     case GameEffect effect:
                         if (
-                                            !ProcessAlpha(
-                                                obj,
-                                                ref Client.Game.UO.FileManager.TileData.StaticData[effect.Graphic],
-                                                false,
-                                                ref playerScreePos,
-                                                cotZ,
-                                                out _
-                                            )
-                                        )
+                            !ProcessAlpha(
+                                obj,
+                                ref Client.Game.UO.FileManager.TileData.StaticData[effect.Graphic],
+                                false,
+                                ref playerScreePos,
+                                cotZ,
+                                out _
+                            )
+                        )
                         {
                             continue;
                         }
@@ -987,7 +988,7 @@ namespace ClassicUO.Game.Scenes
 
                         //PushToRenderList(obj, ref _renderList, ref _renderListStaticsHead, ref _renderListStaticsCount, false);
 
-                        PushToRenderQueue(
+                        yield return PrepareForRendering(
                             obj,
                             false,
                             false
@@ -996,7 +997,7 @@ namespace ClassicUO.Game.Scenes
                 }
             }
 
-            return false;
+            yield break;
         }
 
         private void GetViewPort()
@@ -1108,6 +1109,11 @@ namespace ClassicUO.Game.Scenes
             _last_scaled_offset.Y = winGameScaledOffsetY;
 
             UpdateMaxDrawZ();
+        }
+        private struct GameObjectRenderPreparation(GameObject gameObject, bool isTranslucent)
+        {
+            public GameObject gameObject = gameObject;
+            public bool isTranslucent = isTranslucent;
         }
 
         private struct TreeUnion

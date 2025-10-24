@@ -17,6 +17,7 @@ using Microsoft.Xna.Framework.Graphics;
 using SDL3;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
 
 namespace ClassicUO.Game.Scenes
@@ -610,32 +611,43 @@ namespace ClassicUO.Game.Scenes
             (var minChunkX, var minChunkY) = (minX >> 3, minY >> 3);
             (var maxChunkX, var maxChunkY) = (maxX >> 3, maxY >> 3);
 
-            for (var chunkX = minChunkX; chunkX <= maxChunkX; chunkX++)
-            {
-                for (var chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
-                {
-                    var chunk = map.GetChunk2(chunkX, chunkY, true);
-                    if (chunk == null || chunk.IsDestroyed)
-                        continue;
+            var chunkXs = Enumerable.Range(minChunkX, maxChunkX - minChunkX + 1);
+            var chunkYs = Enumerable.Range(minChunkY, maxChunkY - minChunkY + 1);
 
-                    for (var x = 0; x < 8; x++)
-                    {
-                        for (var y = 0; y < 8; y++)
-                        {
-                            var firstObj = chunk.GetHeadObject(x, y);
-                            if (firstObj == null || firstObj.IsDestroyed)
-                                continue;
+            var chunkInternalX = Enumerable.Range(0, 8);
+            var chunkInternalY = Enumerable.Range(0, 8);
 
-                            AddTileToRenderList(
+            // we use parallel here to speed up the process of gathering visible objects
+            var allVisibleGameObjects =
+                chunkXs
+                // we gather all chunks in view
+                .SelectMany(chunkX =>
+                    chunkYs.Select(chunkY => map.GetChunk2(chunkX, chunkY, true)))
+                .AsParallel()
+                .Where(chunk => chunk != null && !chunk.IsDestroyed)
+                // we gather all head objects from each chunk
+                .SelectMany(chunk =>
+                    chunkInternalX.SelectMany(x =>
+                        chunkInternalY.Select(y => chunk.GetHeadObject(x, y))
+                    )
+                )
+                .Where(firstObj => firstObj != null && !firstObj.IsDestroyed)
+                // we prepare all objects on tile for rendering - this is the most costly operation
+                .SelectMany(firstObj => PrepareAllGameObjectsOnTileForRendering(
                                 firstObj,
                                 use_handles,
                                 150,
                                 maxCotZ,
-                                ref playerPos
-                            );
-                        }
-                    }
-                }
+                                playerPos
+                            ))
+                // filter out nulls
+                .Where(obj => obj != null)
+                .Select(obj => obj.Value);
+
+            // render lists are not thread safe and the operation is not costly anyways - so we add them in a single thread
+            foreach (GameObjectRenderPreparation obj in allVisibleGameObjects)
+            {
+                _renderLists.Add(obj.gameObject, obj.isTranslucent);
             }
 
             if (_alphaChanged)
